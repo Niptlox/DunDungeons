@@ -90,8 +90,8 @@ class Player:
 
     def __init__(self, game, position, game_map):
         self.game = game
-        self.position = Vector2(position)
-        self.size = self.size
+        self.rect = pg.Rect(position, self.size)
+        self.real_position = Vector2(self.rect.center)
         self.game_map = game_map
         self.speed = 0.2
         self.rot_speed = 0.005
@@ -101,8 +101,13 @@ class Player:
         self.collision_entities = False
 
     @property
-    def rect(self):
-        return pg.Rect(self.position, self.size)
+    def position(self):
+        return self.real_position
+
+    @position.setter
+    def position(self, position):
+        self.real_position = position
+        self.rect.topleft = position
 
     def update_real_position(self):
         self.real_position = self.rect.topleft
@@ -177,7 +182,6 @@ class Player:
                                     math.cos(self.rotation - math.pi / 2)) * speed
             # print((movement[1]), self.rect.y)
         self.move(movement)
-        self.position += self.physic_speed
         tx, ty = self.rect.centerx // TSIDE, self.rect.centery // TSIDE
         if self.game_map.get_tile_with_def((tx, ty)) == 9:
             self.getting_key(9)
@@ -191,16 +195,17 @@ class Player:
         self.position = self.position + Vector2(movement[0], 0)
         if self.collision_entities:
             for collide_rect in self.game_map.rect_collision_entities(self.rect):
-
                 if movement[0] >= 0:
                     self.rect.centerx = collide_rect.left + off
                 elif movement[0] < 0:
                     self.rect.centery = collide_rect.right -off
+                self.update_real_position()
         for collision in self.game_map.rect_collision_tiles(self.rect):
             if movement[0] >= 0:
                 self.rect.right = collision[0] * TSIDE
             elif movement[0] < 0:
                 self.rect.left = collision[0] * TSIDE + TSIDE
+            self.update_real_position()
 
         self.position = self.position + Vector2(0, movement[1])
         if self.collision_entities:

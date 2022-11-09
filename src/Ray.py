@@ -60,7 +60,7 @@ def get_line(start, end):
     return points
 
 
-def raycast_DDA(vPlayer, vMouse, cellSize, vMapSize, arrMap, walls={2, 4, 5}):
+def raycast_DDA(vPlayer, vMouse, cellSize, vMapSize, arrMap, walls={2, 4, 5}, offset_dist=0):
     # https://github.com/OneLoneCoder/Javidx9/blob/master/PixelGameEngine/SmallerProjects/OneLoneCoder_PGE_RayCastDDA.cpp
     # DDA Algorithm ==============================================
     # https://lodev.org/cgtutor/raycasting.html
@@ -104,7 +104,7 @@ def raycast_DDA(vPlayer, vMouse, cellSize, vMapSize, arrMap, walls={2, 4, 5}):
 
     bTileFound = False
     lstTilesFound = set()
-    fMaxDistance = 80.0
+    fMaxDistance = 30
     last_tile = (0, 0)
     fDistance = 0.0
     while (not bTileFound) and (fDistance < fMaxDistance):
@@ -132,6 +132,6 @@ def raycast_DDA(vPlayer, vMouse, cellSize, vMapSize, arrMap, walls={2, 4, 5}):
     # Calculate intersection location
     vIntersection = Vector2()
     if (bTileFound or 1):
-        vIntersection = vRayDir * fDistance
+        vIntersection = vRayDir * (fDistance - offset_dist)
 
     return lstTilesFound, vIntersection, last_tile

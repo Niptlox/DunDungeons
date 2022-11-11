@@ -1,7 +1,7 @@
 from pygame import Vector2, Rect
 
 
-def physic_colliding_circle_square(circle_center, radius, rect: Rect, sx=1, sy=1):
+def physic_colliding_circle_square(circle_center, radius, rect, sx=1, sy=1):
     # 1 -top 2-bottom 4-left 8-right
     side = 0
     rx, ry, rw, rh = rect

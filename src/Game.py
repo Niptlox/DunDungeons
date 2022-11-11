@@ -26,6 +26,7 @@ TSIZE = TSIDE, TSIDE
 DRAW_RAYS = False
 DRAW_ENTITY_RECT = False
 
+
 def create_none_img(size):
     img = pg.Surface(size).convert_alpha()
     img.fill((0, 0, 0, 0))
@@ -108,6 +109,9 @@ class Player:
         self.screen_position = (-1, -1)
         self.key = None
         self.collision_entities = False
+        self.lives = 100
+        self.punch = 10
+        self.alive = True
 
     @property
     def rect(self):
@@ -202,22 +206,32 @@ class Player:
         off = 10
         r = self.size[0] // 2
         self.position += Vector2(movement)
-
+        punching = pg.mouse.get_pressed() or isinstance(self, Zombie)
         if self.collision_entities:
-            for collide_rect in self.game_map.rect_collision_entities(self):
-                # (637, 497)
+            for collide_entity in self.game_map.rect_collision_entities(self):
+                collide_rect = collide_entity.rect
                 if self.collider == "circle":
                     cx, cy = physic_colliding_circle_circle(Vector2(self.rect.center), r, Vector2(collide_rect.center),
                                                             collide_rect.w // 2)
                 else:
                     cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
                 self.position.xy = cx - self.size[0] // 2, cy - self.size[1] // 2
+                if punching:
+                    collide_entity.get_damage(self.punch)
         for collision in self.game_map.rect_collision_tiles(self.rect):
             collide_rect = (collision[0] * TSIDE, collision[1] * TSIDE, TSIDE, TSIDE)
             cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
             self.position.xy = cx - self.size[0] // 2, cy - self.size[1] // 2
 
         # print(movement, self.position, self.__class__)
+
+    def get_damage(self, damage):
+        self.lives -= damage
+        if self.lives <= 0:
+            self.kill()
+
+    def kill(self):
+        self.alive = False
 
 
 class Zombie(Player):
@@ -227,6 +241,8 @@ class Zombie(Player):
         super(Zombie, self).__init__(game, position, game_map)
         self.collision_entities = True
         self.speed = 0.1
+        self.lives = 50
+        self.punch = 2
 
     def update(self, tick=20):
         nvec = (Vector2(self.game.player.rect.center) - Vector2(self.rect.center))
@@ -263,8 +279,14 @@ class GameMap:
         self.clear_map()
 
     def update(self, tick):
-        for entity in self.entities:
+        i = 0
+        while i < len(self.entities):
+            entity = self.entities[i]
             entity.update(tick)
+            if not entity.alive:
+                self.entities.pop(i)
+                i -= 1
+            i += 1
 
     def clear_map(self):
         self.array_map = self.set_map_of_sym(self.default)
@@ -341,7 +363,7 @@ class GameMap:
         self.array_map = gen.mapArr
         # key
         room = gen.roomList[0]
-        self.set_tile((room[2] + max(0, randint(0, room[1])-1), room[3] + max(0, randint(0, room[0])-1)), 9)
+        self.set_tile((room[2] + max(0, randint(0, room[1]) - 1), room[3] + max(0, randint(0, room[0]) - 1)), 9)
         self.player_position = (room[2] * TSIDE, (room[3] + 1) * TSIDE)
         #  portal
         room = random.choice(gen.roomList)
@@ -350,7 +372,7 @@ class GameMap:
         print(gen.roomList)
         for room in gen.roomList:
             for i in range(randint(0, 2) * randint(0, 1)):
-                ix, iy = (room[2] + max(0, randint(0, room[1])-1), room[3] + max(0, randint(0, room[0])-1))
+                ix, iy = (room[2] + max(0, randint(0, room[1]) - 1), room[3] + max(0, randint(0, room[0]) - 1))
                 zombie = Zombie(self.game, (ix * TSIDE, iy * TSIDE), self)
                 self.add_entity(zombie)
 
@@ -366,7 +388,7 @@ class GameMap:
         rect = p_entity.rect
         for entity in self.entities + [self.game.player]:
             if entity is not p_entity and rect.colliderect(entity.rect):
-                collisions.append(entity.rect)
+                collisions.append(entity)
         return collisions
 
 
@@ -489,6 +511,9 @@ class Camera:
     def draw_player(self):
         self.draw_player_entity(self.player)
 
+    def draw_player_ui(self):
+        pg.draw.rect(self.display, "green", (5, 5, self.player.lives, 5))
+
     def draw_player_entity(self, entity):
         hs = entity.half_size
         px, py = entity.position.x - self.int_position[0] + hs[0], entity.position.y - self.int_position[1] + hs[1]
@@ -500,7 +525,7 @@ class Camera:
         if DRAW_ENTITY_RECT:
             pg.draw.rect(self.display, "red",
                          ((entity.position.x - self.int_position[0], entity.position.y - self.int_position[1]),
-                      entity.size), 1)
+                          entity.size), 1)
 
     def draw_shadow(self):
         pvec = Vector2(self.player.rect.centerx - self.int_position[0], self.player.rect.centery - self.int_position[1])
@@ -521,7 +546,9 @@ class Camera:
 
     def draw_ui(self):
         text = font.render(f"Level: {self.game.level}", True, "white")
-        self.display.blit(text, (5, 5))
+        self.display.blit(text, (5, 15))
+
+        self.draw_player_ui()
 
 
 def main():

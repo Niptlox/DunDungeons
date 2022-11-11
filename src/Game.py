@@ -1,13 +1,16 @@
 import math
 import random
 from math import cos, sin, atan
+from typing import List
 
 import pygame as pg
 from random import randint
 
 # frame rate per second
+from pygame import Rect
 from pygame.math import Vector2
 
+from src.PhysicEngine import physic_colliding_circle_square, physic_colliding_circle_circle
 from src.RandomDangeonGenerator import dMap
 from src.Ray import raycast_DDA
 
@@ -20,7 +23,8 @@ screen = pg.display.set_mode(WSIZE)
 # size of tile
 TSIDE = 40
 TSIZE = TSIDE, TSIDE
-
+DRAW_RAYS = False
+DRAW_ENTITY_RECT = False
 
 def create_none_img(size):
     img = pg.Surface(size).convert_alpha()
@@ -86,12 +90,17 @@ class Player:
     size = (TSIDE * 2 // 3, TSIDE * 2 // 3)
     # 0 - arrows; 1 - with rotate, 2 - with rotate mouse
     type_movement = 2
+    FOV = 60  # degres
+    cof_line = 800
+    cof_angle = int(FOV / 360 * 2 * cof_line)
     color = "white"
+    collider = "circle"
 
     def __init__(self, game, position, game_map):
         self.game = game
         self.position = Vector2(position)
         self.size = self.size
+        self.half_size = self.size[0] // 2, self.size[1] // 2
         self.game_map = game_map
         self.speed = 0.2
         self.rot_speed = 0.005
@@ -104,8 +113,9 @@ class Player:
     def rect(self):
         return pg.Rect(self.position, self.size)
 
-    def update_real_position(self):
-        self.real_position = self.rect.topleft
+    @property
+    def center(self):
+        return self.position + Vector2(self.half_size)
 
     def getting_key(self, key):
         self.key = key
@@ -114,19 +124,20 @@ class Player:
     def viewed_tiles(self):
         lsts = set()
         vecs = []
-        cof_line = 8
         walls = set()
-        for i in range(-40 * cof_line, 40 * cof_line):
-            i /= 100 * cof_line
-            pos_2 = Vector2(self.rect.centerx + math.sin(self.rotation + i * math.pi),
-                            self.rect.centery + math.cos(self.rotation + i * math.pi))
-            lst, vec, last_tile = raycast_DDA(Vector2(self.rect.center), pos_2, TSIDE, Vector2(self.game_map.size),
+        center = self.position + Vector2(self.half_size)
+
+        for i in range(-self.cof_angle, self.cof_angle):
+            i /= self.cof_line
+            pos_2 = Vector2(center.x + math.sin(self.rotation + i * math.pi),
+                            center.y + math.cos(self.rotation + i * math.pi))
+            lst, vec, last_tile = raycast_DDA(Vector2(center), pos_2, TSIDE, Vector2(self.game_map.size),
                                               self.game_map.array_map,
                                               walls={2, 1, 4, 5} ^ self.game_map.collision_exclusion)
             vecs.append(vec)
             lsts |= lst
             walls.add(last_tile)
-        xy = (int(self.rect.centerx) // TSIDE, int(self.rect.centery) // TSIDE)
+        xy = (int(center.x) // TSIDE, int(center.y) // TSIDE)
         if 0 <= xy[0] < self.game_map.size[0] and 0 <= xy[1] < self.game_map.size[1]:
             lsts.add(xy)
         return lsts, vecs, walls
@@ -176,9 +187,10 @@ class Player:
                 movement += Vector2(math.sin(self.rotation - math.pi / 2),
                                     math.cos(self.rotation - math.pi / 2)) * speed
             # print((movement[1]), self.rect.y)
+        self.movement = movement
         self.move(movement)
-        self.position += self.physic_speed
-        tx, ty = self.rect.centerx // TSIDE, self.rect.centery // TSIDE
+        center = self.center
+        tx, ty = int(center.x // TSIDE), int(center.y // TSIDE)
         if self.game_map.get_tile_with_def((tx, ty)) == 9:
             self.getting_key(9)
             self.game_map.set_tile((tx, ty), 0)
@@ -186,45 +198,26 @@ class Player:
             self.game.new_game_map()
 
     def move(self, movement):
+        # TODo: переевести с rect на position
         off = 10
-        self.rect.x += movement[0]
-        self.position = self.position + Vector2(movement[0], 0)
-        if self.collision_entities:
-            for collide_rect in self.game_map.rect_collision_entities(self.rect):
+        r = self.size[0] // 2
+        self.position += Vector2(movement)
 
-                if movement[0] >= 0:
-                    self.rect.centerx = collide_rect.left + off
-                elif movement[0] < 0:
-                    self.rect.centery = collide_rect.right -off
-        for collision in self.game_map.rect_collision_tiles(self.rect):
-            if movement[0] >= 0:
-                self.rect.right = collision[0] * TSIDE
-            elif movement[0] < 0:
-                self.rect.left = collision[0] * TSIDE + TSIDE
-
-        self.position = self.position + Vector2(0, movement[1])
         if self.collision_entities:
-            for collide_rect in self.game_map.rect_collision_entities(self.rect):
-                # if my_pos.y > center.y:
-                #     # под
-                #     new_y = coll.y2 + self.collider.radius
-                # else:
-                #     # над
-                #     new_y = coll.y - self.collider.radius
-                if movement[1] >= 0:
-                    self.rect.centery = collide_rect.top + off
-                    # self.rect.bottom = collide_rect.bottom
-                elif movement[1] < 0:
-                    self.rect.centery = collide_rect.bottom - off
-                    # self.rect.top = collide_rect.top
-                self.update_real_position()
+            for collide_rect in self.game_map.rect_collision_entities(self):
+                # (637, 497)
+                if self.collider == "circle":
+                    cx, cy = physic_colliding_circle_circle(Vector2(self.rect.center), r, Vector2(collide_rect.center),
+                                                            collide_rect.w // 2)
+                else:
+                    cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
+                self.position.xy = cx - self.size[0] // 2, cy - self.size[1] // 2
         for collision in self.game_map.rect_collision_tiles(self.rect):
-            if movement[1] >= 0:
-                self.rect.bottom = collision[1] * TSIDE
-            elif movement[1] < 0:
-                self.rect.top = collision[1] * TSIDE + TSIDE
-            self.update_real_position()
-        # print(movement, self.rect.center, self.__class__)
+            collide_rect = (collision[0] * TSIDE, collision[1] * TSIDE, TSIDE, TSIDE)
+            cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
+            self.position.xy = cx - self.size[0] // 2, cy - self.size[1] // 2
+
+        # print(movement, self.position, self.__class__)
 
 
 class Zombie(Player):
@@ -250,7 +243,7 @@ class Zombie(Player):
                 speed = self.speed * tick
                 self.rotation = -Vector2((0, 0)).angle_to(nvec) / 180 * math.pi + math.pi / 2
                 self.move(nvec * speed)
-                print(self.position)
+                # print(self.position)
 
 
 type_generate = 2
@@ -348,15 +341,16 @@ class GameMap:
         self.array_map = gen.mapArr
         # key
         room = gen.roomList[0]
-        self.set_tile((room[2] + randint(0, max(1, room[0] - 3)), room[3] + randint(0, max(1, room[1] - 3))), 9)
+        self.set_tile((room[2] + max(0, randint(0, room[1])-1), room[3] + max(0, randint(0, room[0])-1)), 9)
         self.player_position = (room[2] * TSIDE, (room[3] + 1) * TSIDE)
         #  portal
         room = random.choice(gen.roomList)
         self.set_tile((room[2] + room[1] // 2, room[3] + room[0] // 2), 7)
         # zombs
+        print(gen.roomList)
         for room in gen.roomList:
-            for i in range(randint(0, 3) * randint(0, 1)):
-                ix, iy = (room[2] + randint(0, max(1, room[0] - 3)), room[3] + randint(0, max(1, room[1] - 3)))
+            for i in range(randint(0, 2) * randint(0, 1)):
+                ix, iy = (room[2] + max(0, randint(0, room[1])-1), room[3] + max(0, randint(0, room[0])-1))
                 zombie = Zombie(self.game, (ix * TSIDE, iy * TSIDE), self)
                 self.add_entity(zombie)
 
@@ -367,11 +361,12 @@ class GameMap:
                 collisions.append((x // TSIDE, y // TSIDE))
         return collisions
 
-    def rect_collision_entities(self, rect: pg.Rect):
-        collisions = []
-        for entity in self.entities+ [self.game.player]:
-            if entity.rect is not rect and rect.colliderect(entity.rect):
-                collisions.append(rect)
+    def rect_collision_entities(self, p_entity):
+        collisions: List[Rect] = []
+        rect = p_entity.rect
+        for entity in self.entities + [self.game.player]:
+            if entity is not p_entity and rect.colliderect(entity.rect):
+                collisions.append(entity.rect)
         return collisions
 
 
@@ -404,9 +399,9 @@ class Game:
         self.level += new_level
 
         self.camera.reset_game_map()
-        self.game_map.set_size((20 + 10 * self.level, 15 + 10 * self.level))
+        self.game_map.set_size((10 + 10 * self.level, 10 + 10 * self.level))
         self.game_map.map_generate()
-        self.player.position = self.game_map.player_position
+        self.player.position = Vector2(self.game_map.player_position)
 
     def main(self):
         self.running = True
@@ -432,25 +427,34 @@ class Camera:
         self.game = game
         self.game_map = game.game_map
         self.player = game.player
-        self.rect = pg.Rect((0, 0), WSIZE)
+        self.size = WSIZE
+        self.position = Vector2(0, 0)
         self.move_to_player()
         self.display = pg.Surface(WSIZE)
         self.view_tiles = set()
         self.view_rays = []
         self.view_walls = set()
-        self.b_shadows = False
+        self.b_shadows = True
 
     def move_to_player(self):
-        self.rect.x = self.player.rect.x - WSIZE[0] // 2
-        self.rect.y = self.player.rect.y - WSIZE[1] // 2
+        self.position.x = self.player.position.x - WSIZE[0] // 2
+        self.position.y = self.player.position.y - WSIZE[1] // 2
+
+    @property
+    def int_position(self):
+        return int(self.position.x), int(self.position.y)
+
+    @property
+    def rect(self):
+        return pg.Rect(self.position, self.size)
 
     def reset_game_map(self):
         self.view_tiles = set()
 
     def draw(self, surface):
         self.display.fill("#A3A3A3")
-        self.rect.x += (self.player.rect.x - self.rect.x - WSIZE[0] // 2) / 5
-        self.rect.y += (self.player.rect.y - self.rect.y - WSIZE[1] // 2) / 5
+        self.position.x += (self.player.position.x - self.position[0] - WSIZE[0] // 2) / 5
+        self.position.y += (self.player.position.y - self.position[1] - WSIZE[1] // 2) / 5
         tiles, self.view_rays, self.view_walls = self.player.viewed_tiles()
         self.view_tiles |= tiles
         if self.b_shadows:
@@ -470,9 +474,9 @@ class Camera:
         for ix, iy in tiles:
             t = self.game_map.get_tile((ix, iy))
             if t in cell_imgs:
-                tx, ty = ix * TSIDE - self.rect.x, iy * TSIDE - self.rect.y
+                tx, ty = ix * TSIDE - self.int_position[0], iy * TSIDE - self.int_position[1]
                 self.display.blit(cell_imgs[t], (tx, ty))
-        pg.draw.rect(self.display, "black", (-self.rect.x, -self.rect.y,
+        pg.draw.rect(self.display, "black", (-self.int_position[0], -self.int_position[1],
                                              self.game_map.size[0] * TSIDE, self.game_map.size[1] * TSIDE),
                      1)
 
@@ -486,20 +490,25 @@ class Camera:
         self.draw_player_entity(self.player)
 
     def draw_player_entity(self, entity):
-        px, py = entity.rect.centerx - self.rect.x, entity.rect.centery - self.rect.y
+        hs = entity.half_size
+        px, py = entity.position.x - self.int_position[0] + hs[0], entity.position.y - self.int_position[1] + hs[1]
         entity.set_screen_position((px, py))
         pos_2 = px + math.sin(entity.rotation) * 10, \
                 py + math.cos(entity.rotation) * 10
-        pg.draw.circle(self.display, entity.color, (px, py), entity.rect.w // 2)
+        pg.draw.circle(self.display, entity.color, (px, py), entity.size[0] // 2)
         pg.draw.line(self.display, "black", (px, py), pos_2, 1)
-        pg.draw.rect(self.display, "red", ((entity.rect.x - self.rect.x, entity.rect.y - self.rect.y), entity.rect.size), 1)
+        if DRAW_ENTITY_RECT:
+            pg.draw.rect(self.display, "red",
+                         ((entity.position.x - self.int_position[0], entity.position.y - self.int_position[1]),
+                      entity.size), 1)
 
     def draw_shadow(self):
-        pvec = Vector2(self.player.rect.centerx - self.rect.x, self.player.rect.centery - self.rect.y)
-        # for vec in self.view_rays:
-        #     pg.draw.line(self.display, "orange", pvec, pvec + vec * TSIDE)
+        pvec = Vector2(self.player.rect.centerx - self.int_position[0], self.player.rect.centery - self.int_position[1])
+        if DRAW_RAYS:
+            for vec in self.view_rays:
+                pg.draw.line(self.display, "orange", pvec, pvec + vec * TSIDE)
 
-        sur = pg.Surface(self.rect.size)
+        sur = pg.Surface(self.size)
         sur.fill("#44403C")
         points = [pvec + vec * TSIDE for vec in self.view_rays] + [pvec]
         pg.draw.polygon(sur, "white", points)

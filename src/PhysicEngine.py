@@ -1,7 +1,7 @@
-from pygame import Vector2
+from pygame import Vector2, Rect
 
 
-def physic_colliding_circle_square(circle_center, radius, rect, sx=1, sy=1):
+def physic_colliding_circle_square(circle_center, radius, rect: Rect, sx=1, sy=1):
     # 1 -top 2-bottom 4-left 8-right
     side = 0
     rx, ry, rw, rh = rect
@@ -12,12 +12,9 @@ def physic_colliding_circle_square(circle_center, radius, rect, sx=1, sy=1):
     vec_rect_circle = position - center
     vec_rect_r = Vector2(rx2, ry) - Vector2(rx, ry2)
     vec_rect_l = Vector2(rx, ry) - Vector2(rx2, ry2)
-    vec_rect_circle.normalize_ip()
-    vec_rect_l.normalize_ip()
-    vec_rect_r.normalize_ip()
     dot_r = vec_rect_r.dot(vec_rect_circle)
     dot_l = vec_rect_l.dot(vec_rect_circle)
-    print(dot_r, dot_l)
+    
     if dot_r > 0:
         if dot_l > 0:
             side = 1  # top
@@ -53,6 +50,18 @@ def physic_colliding_circle_square(circle_center, radius, rect, sx=1, sy=1):
         new_x = rx - r  # слева
 
     return new_x, new_y
+
+
+def physic_colliding_circle_circle(circle_center, radius, circle_center_2, radius_2):
+    # Есили один шар в нутри другого
+    H: Vector2 = (circle_center_2 - circle_center)
+    dist = (radius + radius_2)
+    if H.length_squared() == 0:
+        return circle_center
+    elif H.length_squared() < dist ** 2:
+        my_new_pos = circle_center_2 - (H.normalize() * (dist+0.5))
+        return my_new_pos
+    return circle_center
 
 # import pygame
 # import pygame as pg

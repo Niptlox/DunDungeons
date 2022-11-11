@@ -6,6 +6,9 @@ from math import *
 
 
 class dMap:
+    min_room_size = (4, 4)
+    max_room_size = (9, 9)
+
     def __init__(self):
         self.roomList = []
         self.cList = []
@@ -79,8 +82,10 @@ class dMap:
     def makeRoom(self):
         """Randomly produce room size"""
         rtype = 5
-        rwide = min(self.size_x - 2, randrange(8) + 3)
-        rlong = min(self.size_y - 2, randrange(8) + 3)
+        dsize = (self.max_room_size[0] - self.min_room_size[0], self.max_room_size[1] - self.min_room_size[1])
+
+        rwide = min(self.size_x - 2, (randrange(dsize[0]) if dsize[0] else 0) + self.min_room_size[0])
+        rlong = min(self.size_y - 2, (randrange(dsize[1]) if dsize[1] else 0) + self.min_room_size[1])
         return rwide, rlong, rtype
 
     def makeCorridor(self):

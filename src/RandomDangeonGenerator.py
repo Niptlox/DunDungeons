@@ -2,7 +2,6 @@
 # https://stackoverflow.com/questions/30931325/pygame-random-dungeon-generation
 # http://www.roguebasin.com/index.php?title=Dungeon_builder_written_in_Python
 from random import *
-from math import *
 
 
 class dMap:

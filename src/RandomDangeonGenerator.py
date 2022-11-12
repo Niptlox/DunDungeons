@@ -255,6 +255,10 @@ class dMap:
             self.joinCorridor(x[0], x[1], x[2], x[3], 10)
 
 
+def random_pos_in_room(room):
+    return room[2] + max(0, randint(0, room[1]) - 1), room[3] + max(0, randint(0, room[0]) - 1)
+
+
 def main():
     # ----------------------------------------------------------------------------
     # Main

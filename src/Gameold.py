@@ -187,7 +187,7 @@ class Player:
             self.getting_key(9)
             self.game_map.set_tile((tx, ty), 0)
         if self.game_map.get_tile_with_def((tx, ty)) == 7:
-            self.game.new_game_map()
+            self.game.new_level()
 
     def move(self, movement):
         off = 10

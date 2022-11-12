@@ -1,4 +1,5 @@
 import math
+import os
 import random
 from math import cos, sin, atan
 from typing import List
@@ -10,9 +11,11 @@ from random import randint
 from pygame import Rect
 from pygame.math import Vector2
 
+from src.ClassUI import SurfaceUI
 from src.PhysicEngine import physic_colliding_circle_square, physic_colliding_circle_circle
-from src.RandomDangeonGenerator import dMap
+from src.RandomDangeonGenerator import dMap, random_pos_in_room
 from src.Ray import raycast_DDA
+from src.ui import RestartUI
 
 FPS = 60
 
@@ -27,31 +30,80 @@ DRAW_RAYS = False
 DRAW_ENTITY_RECT = False
 
 
-def create_none_img(size):
+def create_none_img(size=TSIZE):
     img = pg.Surface(size).convert_alpha()
     img.fill((0, 0, 0, 0))
     return img
 
 
-def create_cell_img(color):
-    img = pg.Surface(TSIZE)
+def create_cell_img(color, size=TSIZE):
+    img = pg.Surface(size)
     img.fill(color)
     # img.fill(color, (1, 1, TSIDE - 2, TSIDE - 2))
     return img
 
 
-def create_key_img(color):
-    img = pg.Surface(TSIZE).convert_alpha()
+def create_key_img(color="blue", size=TSIZE):
+    side = size[0]
+    img = pg.Surface((side, side)).convert_alpha()
     img.fill((0, 0, 0, 0))
-    pg.draw.circle(img, color, (5, 5), 4)
-    pg.draw.line(img, color, (5, 5), (12, 5))
-    pg.draw.line(img, color, (12, 5), (12, 8))
+    img = create_cell_img("gray", size=size)
+    r = side // 8
+    x, y = side // 6, side // 6
+    pg.draw.circle(img, color, (x, y), r)
+    x2 = x + TSIDE // 4
+    pg.draw.line(img, color, (x, y), (x2, y))
+    pg.draw.line(img, color, (x2, y), (x2, y + TSIDE // 10))
     return img
 
 
-def create_portal_img(color):
-    img = create_none_img(TSIZE)
-    pg.draw.circle(img, color, (TSIDE // 2, TSIDE // 2), TSIDE // 3, 4)
+def create_portal_img(color="purple", size=TSIZE):
+    img = create_none_img(size)
+    img = create_cell_img("gray", size=size)
+    pg.draw.circle(img, color, (size[0] // 2, size[0] // 2), size[0] // 3, 4)
+    return img
+
+
+def create_medkit_img(size=TSIZE):
+    color = "red"
+    img = create_cell_img("gray", size=size)
+    if size[0] > 5:
+        ofs = size[0] // 16
+        w, h = size[0] // 5, size[1] // 3 * 2
+        pg.draw.rect(img, "white", (ofs, ofs, h, h))
+        pg.draw.rect(img, color, (ofs * 2 + h // 2 - w // 2, ofs * 3, w - ofs * 2, h - ofs * 4))
+        pg.draw.rect(img, color, (ofs * 3, ofs * 2 + h // 2 - w // 2, h - ofs * 4, w - ofs * 2))
+    else:
+        img.fill("white")
+        img.fill("red", (1, 1, size[0] - 2, size[1] - 2))
+    return img
+
+
+def one_coin_img():
+    r = 8
+    img = pg.Surface((r * 2, r * 2))
+    img.set_colorkey("black")
+    pg.draw.circle(img, "yellow", (r, r), r)
+    pg.draw.circle(img, "orange", (r, r), r, 2)
+    return img
+
+
+def create_coin_img(size=TSIZE, c=2):
+    color = "yellow"
+    img = create_cell_img("gray", size=size)
+    if size[0] > 5:
+        r = max(2, size[0] // 8)
+        pg.draw.circle(img, color, (size[0] // 2 - 1, size[0] // 2 - 2), r)
+        pg.draw.circle(img, "orange", (size[0] // 2 - 1, size[0] // 2 - 2), r, 1)
+        pg.draw.circle(img, color, (size[0] // 2 + 2, size[0] // 2 + 2), r)
+        pg.draw.circle(img, "orange", (size[0] // 2 + 2, size[0] // 2 + 2), r, 1)
+        if c == 3:
+            pg.draw.circle(img, color, (size[0] // 2 + 5, size[0] // 2 - 3), r)
+            pg.draw.circle(img, "orange", (size[0] // 2 + 5, size[0] // 2 - 3), r, 1)
+    else:
+        img.fill("orange")
+        img.fill("yellow", (1, 1, size[0] - 3, size[1] - 3))
+
     return img
 
 
@@ -62,9 +114,45 @@ cell_imgs = {
     3: create_cell_img("yellow"),
     4: create_cell_img("blue"),
     5: create_cell_img("black"),
-    9: create_key_img("blue"),
-    7: create_portal_img("purple")
+    7: create_portal_img(),
+    9: create_key_img(),
+    11: create_coin_img(),
+    12: create_coin_img(c=3),
+    15: create_medkit_img(),
 }
+minimap_size = (40, 40)
+MINISIDE = 5
+minimap_cell_size = (MINISIDE, MINISIDE)
+minimap_cell_imgs = {
+    0: create_cell_img("gray", minimap_cell_size),
+    2: create_cell_img("black", minimap_cell_size),
+    3: create_cell_img("yellow", minimap_cell_size),
+    4: create_cell_img("blue", minimap_cell_size),
+    5: create_cell_img("black", minimap_cell_size),
+    7: create_portal_img(size=minimap_cell_size),
+    9: create_key_img(size=minimap_cell_size),
+    11: create_coin_img(minimap_cell_size),
+    12: create_coin_img(minimap_cell_size, c=3),
+    15: create_medkit_img(size=minimap_cell_size),
+
+}
+
+path_data_file = os.getcwd() + "/data.f"
+
+
+def get_record():
+    if os.path.isfile(path_data_file):
+        with open(path_data_file, "r") as f:
+            t = f.readline()
+        return int(t) if t.isdigit() else 0
+    return 0
+
+
+def set_record(record):
+    last_record = get_record()
+    with open(path_data_file, "w") as f:
+        f.write(str(max(last_record, record)))
+
 
 PHYSICAL_TILES = {2, 1, 4}
 
@@ -96,6 +184,7 @@ class Player:
     cof_angle = int(FOV / 360 * 2 * cof_line)
     color = "white"
     collider = "circle"
+    max_lives = 100
 
     def __init__(self, game, position, game_map):
         self.game = game
@@ -109,9 +198,15 @@ class Player:
         self.screen_position = (-1, -1)
         self.key = None
         self.collision_entities = False
-        self.lives = 100
+        self.lives = self.max_lives
         self.punch = 10
         self.alive = True
+        self.coins = 0
+
+    def restart(self):
+        self.alive = True
+        self.lives = self.max_lives
+        self.coins = 0
 
     @property
     def rect(self):
@@ -195,11 +290,21 @@ class Player:
         self.move(movement)
         center = self.center
         tx, ty = int(center.x // TSIDE), int(center.y // TSIDE)
-        if self.game_map.get_tile_with_def((tx, ty)) == 9:
+        tile_index = self.game_map.get_tile_with_def((tx, ty))
+        if tile_index == 9:
             self.getting_key(9)
             self.game_map.set_tile((tx, ty), 0)
-        if self.game_map.get_tile_with_def((tx, ty)) == 7:
-            self.game.new_game_map()
+        elif tile_index == 7:
+            self.game.new_level()
+        elif tile_index == 11:
+            self.coins += randint(1, 2)
+            self.game_map.set_tile((tx, ty), 0)
+        elif tile_index == 12:
+            self.coins += 3
+            self.game_map.set_tile((tx, ty), 0)
+        elif tile_index == 15:
+            self.add_lives(20)
+            self.game_map.set_tile((tx, ty), 0)
 
     def move(self, movement):
         # TODo: переевести с rect на position
@@ -230,19 +335,22 @@ class Player:
         if self.lives <= 0:
             self.kill()
 
+    def add_lives(self, lives):
+        self.lives = min(self.max_lives, self.lives + lives)
+
     def kill(self):
         self.alive = False
 
 
 class Zombie(Player):
     color = "green"
+    max_lives = 50
 
     def __init__(self, game, position, game_map):
         super(Zombie, self).__init__(game, position, game_map)
         self.collision_entities = True
         self.speed = 0.1
-        self.lives = 50
-        self.punch = 2
+        self.punch = 1
 
     def update(self, tick=20):
         nvec = (Vector2(self.game.player.rect.center) - Vector2(self.rect.center))
@@ -361,20 +469,29 @@ class GameMap:
         gen = dMap()
         gen.makeMap(self.size[0], self.size[1], 70, 30, (self.size[0] * self.size[1]) ** 0.5)
         self.array_map = gen.mapArr
-        # key
-        room = gen.roomList[0]
-        self.set_tile((room[2] + max(0, randint(0, room[1]) - 1), room[3] + max(0, randint(0, room[0]) - 1)), 9)
-        self.player_position = (room[2] * TSIDE, (room[3] + 1) * TSIDE)
-        #  portal
-        room = random.choice(gen.roomList)
-        self.set_tile((room[2] + room[1] // 2, room[3] + room[0] // 2), 7)
         # zombs
         print(gen.roomList)
-        for room in gen.roomList:
+        for room in gen.roomList[1:]:
             for i in range(randint(0, 2) * randint(0, 1)):
-                ix, iy = (room[2] + max(0, randint(0, room[1]) - 1), room[3] + max(0, randint(0, room[0]) - 1))
+                ix, iy = random_pos_in_room(room)
                 zombie = Zombie(self.game, (ix * TSIDE, iy * TSIDE), self)
                 self.add_entity(zombie)
+        for room in random.choices(gen.roomList, k=len(gen.roomList) // 3):
+            if randint(0, 5) > 1:
+                self.set_tile(random_pos_in_room(room), 11)
+            else:
+                self.set_tile(random_pos_in_room(room), 12)
+
+        for room in random.choices(gen.roomList, k=len(gen.roomList) // 6):
+            self.set_tile(random_pos_in_room(room), 15)
+
+        # key
+        room = gen.roomList[0]
+        self.set_tile(random_pos_in_room(room), 9)
+        self.player_position = (room[2] * TSIDE, (room[3] + 1) * TSIDE)
+        #  portal
+        room = random.choice(gen.roomList[1:]) if len(gen.roomList) > 1 else random.choice(gen.roomList)
+        self.set_tile((room[2] + room[1] // 2, room[3] + room[0] // 2), 7)
 
     def rect_collision_tiles(self, rect: pg.Rect):
         collisions = []
@@ -401,40 +518,62 @@ class Game:
         self.clock = pg.time.Clock()
         self.running = True
         self.level = 0
-        self.new_game_map()
+        self.record_level = get_record()
+        self.new_level()
+        self.restart_ui = RestartUI(self, running=False)
 
     def pg_events(self):
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 self.exit()
             elif event.type == pg.KEYDOWN:
-                if event.key == pg.K_t:
-                    self.new_game_map(new_level=1)
-                elif event.key == pg.K_h:
+                if event.key == pg.K_t and pg.key.get_mods() & pg.KMOD_CTRL:
+                    self.new_level(new_level=1)
+                elif event.key == pg.K_h and pg.key.get_mods() & pg.KMOD_CTRL:
                     self.camera.b_shadows = not self.camera.b_shadows
-                elif event.key == pg.K_f:
+                elif event.key == pg.K_f and pg.key.get_mods() & pg.KMOD_CTRL:
                     self.player.getting_key(9)
+                elif event.key == pg.K_k and pg.key.get_mods() & pg.KMOD_CTRL:
+                    self.player.kill()
             self.player.pg_event(event)
             self.game_map.pg_event(event)
+            self.restart_ui.pg_event(event)
 
-    def new_game_map(self, new_level=1):
+    def restart(self):
+        self.level = 0
+        self.player.restart()
+        self.new_level()
+        self.restart_ui.running = False
+
+    def new_level(self, new_level=1):
         self.level += new_level
 
         self.camera.reset_game_map()
-        self.game_map.set_size((10 + 10 * self.level, 10 + 10 * self.level))
+        self.game_map.set_size((15 + 3 * self.level, 15 + 3 * self.level))
         self.game_map.map_generate()
         self.player.position = Vector2(self.game_map.player_position)
 
     def main(self):
         self.running = True
         while self.running:
-            tick = self.clock.tick(FPS)
-            pg.display.set_caption(f"FPS: {self.clock.get_fps()}")
-            self.pg_events()
+            self.update()
+
+    def update(self):
+        tick = self.clock.tick(FPS)
+        pg.display.set_caption(f"FPS: {self.clock.get_fps()}")
+        self.pg_events()
+        if self.player.alive:
             self.player.update(tick)
-            self.game_map.update(tick)
-            self.camera.draw(self.screen)
-            pg.display.flip()
+        elif not self.restart_ui.running:
+            self.record_level = max(self.record_level, self.level)
+            self.restart_ui.running = True
+            set_record(self.record_level)
+            self.restart_ui.set_level(self.level, self.record_level)
+        self.game_map.update(tick)
+        self.camera.draw(self.screen)
+        if self.restart_ui.running:
+            self.restart_ui.draw(self.screen)
+        pg.display.flip()
 
     def exit(self):
         self.running = False
@@ -457,6 +596,8 @@ class Camera:
         self.view_rays = []
         self.view_walls = set()
         self.b_shadows = True
+        self.minimap_surface = SurfaceUI((0, 0, MINISIDE * minimap_size[0], MINISIDE * minimap_size[1]))
+        self.minimap_surface.rect.right = self.size[0]
 
     def move_to_player(self):
         self.position.x = self.player.position.x - WSIZE[0] // 2
@@ -475,6 +616,7 @@ class Camera:
 
     def draw(self, surface):
         self.display.fill("#A3A3A3")
+
         self.position.x += (self.player.position.x - self.position[0] - WSIZE[0] // 2) / 5
         self.position.y += (self.player.position.y - self.position[1] - WSIZE[1] // 2) / 5
         tiles, self.view_rays, self.view_walls = self.player.viewed_tiles()
@@ -490,6 +632,7 @@ class Camera:
 
         self.draw_player()
         self.draw_ui()
+        # self.display.blit(cell_imgs[12], (280, 0))
         surface.blit(self.display, (0, 0))
 
     def draw_tiles(self, tiles):
@@ -499,8 +642,7 @@ class Camera:
                 tx, ty = ix * TSIDE - self.int_position[0], iy * TSIDE - self.int_position[1]
                 self.display.blit(cell_imgs[t], (tx, ty))
         pg.draw.rect(self.display, "black", (-self.int_position[0], -self.int_position[1],
-                                             self.game_map.size[0] * TSIDE, self.game_map.size[1] * TSIDE),
-                     1)
+                                             self.game_map.size[0] * TSIDE, self.game_map.size[1] * TSIDE), 1)
 
     def draw_view_tiles(self):
         self.draw_tiles(self.view_tiles)
@@ -510,9 +652,6 @@ class Camera:
 
     def draw_player(self):
         self.draw_player_entity(self.player)
-
-    def draw_player_ui(self):
-        pg.draw.rect(self.display, "green", (5, 5, self.player.lives, 5))
 
     def draw_player_entity(self, entity):
         hs = entity.half_size
@@ -546,9 +685,33 @@ class Camera:
 
     def draw_ui(self):
         text = font.render(f"Level: {self.game.level}", True, "white")
-        self.display.blit(text, (5, 15))
+        self.display.blit(text, (5, 25))
+        text = font.render(f"{self.player.coins}", True, "white")
+        coin = one_coin_img()
+        self.display.blit(coin, (5, 53))
+        self.display.blit(text, (25, 54))
 
-        self.draw_player_ui()
+        pg.draw.rect(self.display, "black", (3, 3, 200 + 4, 13))
+        pg.draw.rect(self.display, "#A3F635", (5, 5, self.player.lives / self.player.max_lives * 200, 9))
+
+        self.draw_minimap()
+
+    def draw_minimap(self):
+        tiles = self.view_tiles
+        mside = minimap_cell_size[0]
+
+        # minimap_surface = pg.Surface(surface_size)
+        scroll = int(self.player.position.x / TSIDE * MINISIDE - self.minimap_surface.rect.w // 2), \
+                 int(self.player.position.y / TSIDE * MINISIDE - self.minimap_surface.rect.h // 2)
+        self.minimap_surface.fill("#1E293B")
+        for ix, iy in tiles:
+            t = self.game_map.get_tile((ix, iy))
+            if t in minimap_cell_imgs:
+                tx, ty = ix * mside - scroll[0], iy * mside - scroll[1]
+                self.minimap_surface.blit(minimap_cell_imgs[t], (tx, ty))
+        pg.draw.rect(self.minimap_surface, "#171717", (-scroll[0], -scroll[1],
+                                                       self.game_map.size[0] * mside, self.game_map.size[1] * mside), 1)
+        self.minimap_surface.draw(self.display)
 
 
 def main():

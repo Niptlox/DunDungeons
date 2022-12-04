@@ -14,7 +14,7 @@ def physic_colliding_circle_square(circle_center, radius, rect, sx=1, sy=1):
     vec_rect_l = Vector2(rx, ry) - Vector2(rx2, ry2)
     dot_r = vec_rect_r.dot(vec_rect_circle)
     dot_l = vec_rect_l.dot(vec_rect_circle)
-    
+
     if dot_r > 0:
         if dot_l > 0:
             side = 1  # top
@@ -52,6 +52,10 @@ def physic_colliding_circle_square(circle_center, radius, rect, sx=1, sy=1):
     return new_x, new_y
 
 
+def check_collision_circle_circle(circle_center, radius, circle_center_2, radius_2):
+    return 0 < (circle_center_2 - circle_center).length_squared() < (radius + radius_2) ** 2
+
+
 def physic_colliding_circle_circle(circle_center, radius, circle_center_2, radius_2):
     # Есили один шар в нутри другого
     H: Vector2 = (circle_center_2 - circle_center)
@@ -59,7 +63,7 @@ def physic_colliding_circle_circle(circle_center, radius, circle_center_2, radiu
     if H.length_squared() == 0:
         return circle_center
     elif H.length_squared() < dist ** 2:
-        my_new_pos = circle_center_2 - (H.normalize() * (dist+0.5))
+        my_new_pos = circle_center_2 - (H.normalize() * (dist + 0.5))
         return my_new_pos
     return circle_center
 

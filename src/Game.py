@@ -15,12 +15,13 @@ from src.ClassUI import SurfaceUI
 from src.PhysicEngine import physic_colliding_circle_square, physic_colliding_circle_circle
 from src.RandomDangeonGenerator import dMap, random_pos_in_room
 from src.Ray import raycast_DDA
+from src.Weapons import SWORD_WEAPON_IDX, weapon_cls, STICK_WEAPON_IDX
 from src.ui import RestartUI
 
 FPS = 60
 
 # window screen size
-WSIZE = (1420, 980)
+WSIZE = (720*2, 480*2)
 screen = pg.display.set_mode(WSIZE)
 
 # size of tile
@@ -28,6 +29,44 @@ TSIDE = 40
 TSIZE = TSIDE, TSIDE
 DRAW_RAYS = False
 DRAW_ENTITY_RECT = False
+
+dark_shadow_color = "#44403C"
+
+shadow_mask_size = WSIZE[0] * 2, WSIZE[1] * 2
+view_radius_tiles = 10
+view_radius = view_radius_tiles * TSIDE
+
+def convert_color_hex_rgb(hex_color):
+    return tuple(int(hex_color[i:i + 1], 16) for i in range(1, 7))
+
+
+def create_shadow_mask():
+    count_levels = 5
+    shadow_mask_radius = view_radius + TSIDE // 2
+    surface = pg.Surface(shadow_mask_size).convert_alpha()
+    surface.fill(dark_shadow_color)
+    shadow_rgba = convert_color_hex_rgb(dark_shadow_color)
+    cxy = shadow_mask_size[0] // 2, shadow_mask_size[1] // 2
+    step_r = shadow_mask_radius / count_levels
+    for i in range(1, count_levels + 1):
+        color = shadow_rgba[0], shadow_rgba[1], shadow_rgba[2], 255 * 1 / (i + 1)
+        pg.draw.circle(surface, color, cxy, shadow_mask_radius * 1 / i)
+    return surface
+
+
+surface_shadow_mask = create_shadow_mask()
+
+
+def draw_hands(surface, entity, pos, hand_dist, hand_offset_angle):
+    r = entity.size[0] // 4
+    px, py = pos
+    offset_angle = entity.weapon.punch_anim_angle if entity.weapon else 0
+    pos_h1 = px + math.sin(entity.rotation + hand_offset_angle + offset_angle) * hand_dist, \
+             py + math.cos(entity.rotation + hand_offset_angle + offset_angle) * hand_dist
+    pg.draw.circle(surface, entity.color_hand, pos_h1, r)
+    pos_h2 = px + math.sin(entity.rotation - hand_offset_angle + offset_angle) * hand_dist, \
+             py + math.cos(entity.rotation - hand_offset_angle + offset_angle) * hand_dist
+    pg.draw.circle(surface, entity.color_hand, pos_h2, r)
 
 
 def create_none_img(size=TSIZE):
@@ -175,23 +214,96 @@ def rect_vertexes(rect):
     return vertexes
 
 
-class Player:
-    size = (TSIDE * 2 // 3, TSIDE * 2 // 3)
+#         self.direction = pg.Vector2(direction)
+
+class Entity:
+    radius = 5
+    size = (radius * 2, radius * 2)
+    color = "white"
+    collider = "circle"
+    punch = 15
+    max_lives = -1
+
+    def __init__(self, game, position):
+        self.game = game
+        self.game_map = game.game_map
+        self.position = pg.Vector2(position)
+        self.rotation = 0
+        self.alive = True
+        self.weapon = None
+        self.collision_entities = False
+        self.agresive = True
+        self.lives = self.max_lives
+
+    def update(self, tick=20):
+        pass
+
+    def on_punch(self):
+        pass
+
+    @property
+    def center(self):
+        return self.position + Vector2(self.half_size)
+
+    @property
+    def rect(self):
+        return pg.Rect(self.position, self.size)
+
+    def move(self, movement):
+        # TODo: переевести с rect на position
+        off = 10
+        r = self.size[0] // 2
+        self.position += Vector2(movement)
+        if self.collision_entities:
+            for collide_entity in self.game_map.rect_collision_entities(self.rect, self):
+                collide_rect = collide_entity.rect
+                if self.collider == "circle":
+                    cx, cy = physic_colliding_circle_circle(Vector2(self.rect.center), r, Vector2(collide_rect.center),
+                                                            collide_rect.w // 2)
+                else:
+                    cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
+                self.position.xy = cx - self.size[0] // 2, cy - self.size[1] // 2
+                if self.agresive:
+                    if self.weapon:
+                        self.weapon.start_punch()
+                    else:
+                        collide_entity.get_damage(self.punch)
+                        self.on_punch()
+        for collision in self.game_map.rect_collision_tiles(self.rect):
+            collide_rect = (collision[0] * TSIDE, collision[1] * TSIDE, TSIDE, TSIDE)
+            cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
+            self.position.xy = cx - self.size[0] // 2, cy - self.size[1] // 2
+
+        # print(movement, self.position, self.__class__)
+
+    def get_damage(self, damage):
+        print(self, damage)
+        if self.max_lives != -1:
+            self.lives -= damage
+            if self.lives <= 0:
+                self.kill()
+
+    def kill(self):
+        self.alive = False
+
+
+class Player(Entity):
+    radius = TSIDE * 2 // 6
+    size = (radius * 2, radius * 2)
     # 0 - arrows; 1 - with rotate, 2 - with rotate mouse
     type_movement = 2
     FOV = 60  # degres
     cof_line = 800
     cof_angle = int(FOV / 360 * 2 * cof_line)
     color = "white"
+    color_hand = "#E2E8F0"
     collider = "circle"
     max_lives = 100
 
-    def __init__(self, game, position, game_map):
-        self.game = game
-        self.position = Vector2(position)
+    def __init__(self, game, position):
+        super(Player, self).__init__(game, position)
         self.size = self.size
         self.half_size = self.size[0] // 2, self.size[1] // 2
-        self.game_map = game_map
         self.speed = 0.2
         self.rot_speed = 0.005
         self.rotation = 0
@@ -200,8 +312,9 @@ class Player:
         self.collision_entities = False
         self.lives = self.max_lives
         self.punch = 10
-        self.alive = True
         self.coins = 0
+        self.punching = True
+        self.weapon = weapon_cls[STICK_WEAPON_IDX](self)
 
     def restart(self):
         self.alive = True
@@ -211,10 +324,6 @@ class Player:
     @property
     def rect(self):
         return pg.Rect(self.position, self.size)
-
-    @property
-    def center(self):
-        return self.position + Vector2(self.half_size)
 
     def getting_key(self, key):
         self.key = key
@@ -231,7 +340,7 @@ class Player:
             pos_2 = Vector2(center.x + math.sin(self.rotation + i * math.pi),
                             center.y + math.cos(self.rotation + i * math.pi))
             lst, vec, last_tile = raycast_DDA(Vector2(center), pos_2, TSIDE, Vector2(self.game_map.size),
-                                              self.game_map.array_map,
+                                              self.game_map.array_map, fMaxDistance=view_radius_tiles,
                                               walls={2, 1, 4, 5} ^ self.game_map.collision_exclusion)
             vecs.append(vec)
             lsts |= lst
@@ -246,9 +355,17 @@ class Player:
 
     def pg_event(self, event):
         pass
+        # if event.type == pg.MOUSEBUTTONDOWN:
+        #     if event.button == 1:
+        #         # but left
+        #         if self.weapon:
+        #             print(self.weapon, event)
+        #             self.weapon.start_punch()
 
     def update(self, tick=20):
         keys = pg.key.get_pressed()
+        if pg.mouse.get_pressed()[0] or keys[pg.K_SPACE]:
+            self.weapon.start_punch()
         movement = [0, 0]
         speed = self.speed * tick
         if self.type_movement == 0:
@@ -306,51 +423,20 @@ class Player:
             self.add_lives(20)
             self.game_map.set_tile((tx, ty), 0)
 
-    def move(self, movement):
-        # TODo: переевести с rect на position
-        off = 10
-        r = self.size[0] // 2
-        self.position += Vector2(movement)
-        punching = pg.mouse.get_pressed() or isinstance(self, Zombie)
-        if self.collision_entities:
-            for collide_entity in self.game_map.rect_collision_entities(self):
-                collide_rect = collide_entity.rect
-                if self.collider == "circle":
-                    cx, cy = physic_colliding_circle_circle(Vector2(self.rect.center), r, Vector2(collide_rect.center),
-                                                            collide_rect.w // 2)
-                else:
-                    cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
-                self.position.xy = cx - self.size[0] // 2, cy - self.size[1] // 2
-                if punching:
-                    collide_entity.get_damage(self.punch)
-        for collision in self.game_map.rect_collision_tiles(self.rect):
-            collide_rect = (collision[0] * TSIDE, collision[1] * TSIDE, TSIDE, TSIDE)
-            cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
-            self.position.xy = cx - self.size[0] // 2, cy - self.size[1] // 2
-
-        # print(movement, self.position, self.__class__)
-
-    def get_damage(self, damage):
-        self.lives -= damage
-        if self.lives <= 0:
-            self.kill()
-
     def add_lives(self, lives):
         self.lives = min(self.max_lives, self.lives + lives)
-
-    def kill(self):
-        self.alive = False
 
 
 class Zombie(Player):
     color = "green"
-    max_lives = 50
+    max_lives = 30
 
-    def __init__(self, game, position, game_map):
-        super(Zombie, self).__init__(game, position, game_map)
+    def __init__(self, game, position):
+        super(Zombie, self).__init__(game, position)
         self.collision_entities = True
         self.speed = 0.1
         self.punch = 1
+        self.weapon = weapon_cls[STICK_WEAPON_IDX](self)
 
     def update(self, tick=20):
         nvec = (Vector2(self.game.player.rect.center) - Vector2(self.rect.center))
@@ -425,6 +511,9 @@ class GameMap:
             return self.get_tile(position)
         return default
 
+    def add_entity(self, obj):
+        self.entities.append(obj)
+
     def load(self, text: str):
         arr2d = [list(map(int, st)) for st in text.split("\n") if st]
         self.size = (len(arr2d[0]), len(arr2d))
@@ -458,11 +547,9 @@ class GameMap:
         cnt = 1
         for i in range(cnt):
             ix, iy = randint(1, self.size[0] - 3), randint(1, self.size[0] - 3)
-            zombie = Zombie(self.game, (ix * TSIDE, iy * TSIDE), self)
+            zombie = Zombie(self.game, (ix * TSIDE, iy * TSIDE))
             self.add_entity(zombie)
 
-    def add_entity(self, obj):
-        self.entities.append(obj)
 
     def dungeon_generate(self):
         self.clear_map()
@@ -474,7 +561,7 @@ class GameMap:
         for room in gen.roomList[1:]:
             for i in range(randint(0, 2) * randint(0, 1)):
                 ix, iy = random_pos_in_room(room)
-                zombie = Zombie(self.game, (ix * TSIDE, iy * TSIDE), self)
+                zombie = Zombie(self.game, (ix * TSIDE, iy * TSIDE))
                 self.add_entity(zombie)
         for room in random.choices(gen.roomList, k=len(gen.roomList) // 3):
             if randint(0, 5) > 1:
@@ -500,20 +587,23 @@ class GameMap:
                 collisions.append((x // TSIDE, y // TSIDE))
         return collisions
 
-    def rect_collision_entities(self, p_entity):
+    def rect_collision_entities(self, rect, p_entity=None):
         collisions: List[Rect] = []
-        rect = p_entity.rect
-        for entity in self.entities + [self.game.player]:
+        # rect = p_entity.rect
+        for entity in self.get_entities():
             if entity is not p_entity and rect.colliderect(entity.rect):
                 collisions.append(entity)
         return collisions
+
+    def get_entities(self):
+        return self.entities + [self.game.player]
 
 
 class Game:
     def __init__(self):
         self.screen = screen
         self.game_map = GameMap(self, (40, 80))
-        self.player = Player(self, self.game_map.player_position, self.game_map)
+        self.player = Player(self, self.game_map.player_position)
         self.camera = Camera(self)
         self.clock = pg.time.Clock()
         self.running = True
@@ -655,12 +745,20 @@ class Camera:
 
     def draw_player_entity(self, entity):
         hs = entity.half_size
+        r = entity.size[0] // 2
         px, py = entity.position.x - self.int_position[0] + hs[0], entity.position.y - self.int_position[1] + hs[1]
         entity.set_screen_position((px, py))
+        hand_dist = r
+        hand_offset_angle = math.pi / 5
         pos_2 = px + math.sin(entity.rotation) * 10, \
                 py + math.cos(entity.rotation) * 10
-        pg.draw.circle(self.display, entity.color, (px, py), entity.size[0] // 2)
+        draw_hands(self.display, entity, (px, py), hand_dist, hand_offset_angle)
+        pg.draw.circle(self.display, entity.color, (px, py), r)
         pg.draw.line(self.display, "black", (px, py), pos_2, 1)
+
+        if entity.weapon:
+            entity.weapon.draw(self.display, (px, py), hand_dist, hand_offset_angle)
+
         if DRAW_ENTITY_RECT:
             pg.draw.rect(self.display, "red",
                          ((entity.position.x - self.int_position[0], entity.position.y - self.int_position[1]),
@@ -673,10 +771,11 @@ class Camera:
                 pg.draw.line(self.display, "orange", pvec, pvec + vec * TSIDE)
 
         sur = pg.Surface(self.size)
-        sur.fill("#44403C")
+        sur.fill(dark_shadow_color)
         points = [pvec + vec * TSIDE for vec in self.view_rays] + [pvec]
         pg.draw.polygon(sur, "white", points)
         sur.set_colorkey("white")
+        self.display.blit(surface_shadow_mask, (pvec - Vector2(shadow_mask_size[0] // 2, shadow_mask_size[1] // 2)))
         self.display.blit(sur, (0, 0))
 
     def draw_entities(self):
@@ -709,6 +808,10 @@ class Camera:
             if t in minimap_cell_imgs:
                 tx, ty = ix * mside - scroll[0], iy * mside - scroll[1]
                 self.minimap_surface.blit(minimap_cell_imgs[t], (tx, ty))
+        px, py = self.player.position.xy
+        hs = self.player.half_size
+        pg.draw.circle(self.minimap_surface, "white", (px - scroll[0] + hs[0], py - scroll[1] + hs[1]),
+                       self.player.size[0] // 2 / TSIDE * MINISIDE)
         pg.draw.rect(self.minimap_surface, "#171717", (-scroll[0], -scroll[1],
                                                        self.game_map.size[0] * mside, self.game_map.size[1] * mside), 1)
         self.minimap_surface.draw(self.display)

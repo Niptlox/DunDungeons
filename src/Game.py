@@ -250,7 +250,6 @@ class Entity:
         return pg.Rect(self.position, self.size)
 
     def move(self, movement):
-        # TODo: переевести с rect на position
         off = 10
         r = self.size[0] // 2
         self.position += Vector2(movement)

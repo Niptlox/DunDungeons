@@ -387,7 +387,9 @@ class Player(Entity):
                                               walls={2, 1, 4, 5} ^ self.game_map.collision_exclusion)
             vecs.append(vec)
             lsts |= lst
-            walls.add(last_tile)
+            if last_tile != (0, 0):
+                walls.add(last_tile)
+
         xy = (int(center.x) // TSIDE, int(center.y) // TSIDE)
         if 0 <= xy[0] < self.game_map.size[0] and 0 <= xy[1] < self.game_map.size[1]:
             lsts.add(xy)

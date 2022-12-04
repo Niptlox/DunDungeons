@@ -12,16 +12,17 @@ from pygame import Rect
 from pygame.math import Vector2
 
 from src.ClassUI import SurfaceUI
-from src.PhysicEngine import physic_colliding_circle_square, physic_colliding_circle_circle
+from src.PhysicEngine import physic_colliding_circle_square, physic_colliding_circle_circle, \
+    check_collision_circle_circle
 from src.RandomDangeonGenerator import dMap, random_pos_in_room
 from src.Ray import raycast_DDA
-from src.Weapons import SWORD_WEAPON_IDX, weapon_cls, STICK_WEAPON_IDX
+from src.Weapons import SWORD_WEAPON_IDX, weapon_cls, STICK_WEAPON_IDX, Hands
 from src.ui import RestartUI
 
 FPS = 60
 
 # window screen size
-WSIZE = (720*2, 480*2)
+WSIZE = (720 * 2, 480 * 2)
 screen = pg.display.set_mode(WSIZE)
 
 # size of tile
@@ -35,6 +36,7 @@ dark_shadow_color = "#44403C"
 shadow_mask_size = WSIZE[0] * 2, WSIZE[1] * 2
 view_radius_tiles = 10
 view_radius = view_radius_tiles * TSIDE
+
 
 def convert_color_hex_rgb(hex_color):
     return tuple(int(hex_color[i:i + 1], 16) for i in range(1, 7))
@@ -118,6 +120,12 @@ def create_medkit_img(size=TSIZE):
     return img
 
 
+def create_stick_img(size=TSIZE, color="brown"):
+    img = create_cell_img("gray", size=size)
+    pg.draw.line(img, color, (1, size[1] - 1), (size[0] - 2, 2), 3)
+    return img
+
+
 def one_coin_img():
     r = 8
     img = pg.Surface((r * 2, r * 2))
@@ -146,6 +154,13 @@ def create_coin_img(size=TSIZE, c=2):
     return img
 
 
+shop_cost = {
+    55: 10,
+    65: 7,
+    66: 15,
+    68: 30,
+}
+
 cell_img = create_cell_img("black")
 cell_imgs = {
     0: create_cell_img("gray"),
@@ -158,6 +173,10 @@ cell_imgs = {
     11: create_coin_img(),
     12: create_coin_img(c=3),
     15: create_medkit_img(),
+    55: create_medkit_img(),
+    65: create_stick_img(),
+    66: create_stick_img(color="#334155"),
+    68: create_stick_img(color="#FCD34D"),
 }
 minimap_size = (40, 40)
 MINISIDE = 5
@@ -173,6 +192,10 @@ minimap_cell_imgs = {
     11: create_coin_img(minimap_cell_size),
     12: create_coin_img(minimap_cell_size, c=3),
     15: create_medkit_img(size=minimap_cell_size),
+    55: create_medkit_img(size=minimap_cell_size),
+    65: create_stick_img(size=minimap_cell_size),
+    66: create_stick_img(color="#334155", size=minimap_cell_size),
+    68: create_stick_img(color="#FCD34D", size=minimap_cell_size),
 
 }
 
@@ -193,7 +216,7 @@ def set_record(record):
         f.write(str(max(last_record, record)))
 
 
-PHYSICAL_TILES = {2, 1, 4}
+PHYSICAL_TILES = {2, 1, 4, 55, 65, 66, 68}
 
 
 def rect_vertexes(rect):
@@ -221,10 +244,10 @@ class Entity:
     size = (radius * 2, radius * 2)
     color = "white"
     collider = "circle"
-    punch = 15
     max_lives = -1
 
     def __init__(self, game, position):
+        self.half_size = self.size[0] // 2, self.size[1] // 2
         self.game = game
         self.game_map = game.game_map
         self.position = pg.Vector2(position)
@@ -232,7 +255,7 @@ class Entity:
         self.alive = True
         self.weapon = None
         self.collision_entities = False
-        self.agresive = True
+        self.agresive = False
         self.lives = self.max_lives
 
     def update(self, tick=20):
@@ -265,9 +288,6 @@ class Entity:
                 if self.agresive:
                     if self.weapon:
                         self.weapon.start_punch()
-                    else:
-                        collide_entity.get_damage(self.punch)
-                        self.on_punch()
         for collision in self.game_map.rect_collision_tiles(self.rect):
             collide_rect = (collision[0] * TSIDE, collision[1] * TSIDE, TSIDE, TSIDE)
             cx, cy = physic_colliding_circle_square(self.rect.center, r, collide_rect)
@@ -275,7 +295,7 @@ class Entity:
 
         # print(movement, self.position, self.__class__)
 
-    def get_damage(self, damage):
+    def get_damage(self, damage, owner_punch):
         print(self, damage)
         if self.max_lives != -1:
             self.lives -= damage
@@ -284,6 +304,28 @@ class Entity:
 
     def kill(self):
         self.alive = False
+
+
+class ShopItem(Entity):
+    radius = TSIDE
+    size = (radius * 2, radius * 2)
+
+    def __init__(self, game, position, tile_idx, cost):
+        super(ShopItem, self).__init__(game, position)
+        self.tile_idx = tile_idx
+        self.cost = cost
+
+    def update(self, tick=20):
+        pass
+
+    def remove(self):
+        self.kill()
+        tx, ty = int(self.center.x // TSIDE), int(self.center.y // TSIDE)
+        self.game_map.set_tile((tx, ty), 0)
+
+    def get_damage(self, damage, owner_punch):
+        if isinstance(owner_punch, Player):
+            owner_punch.buy(self)
 
 
 class Player(Entity):
@@ -311,9 +353,11 @@ class Player(Entity):
         self.collision_entities = False
         self.lives = self.max_lives
         self.punch = 10
-        self.coins = 0
+        self.coins = 100
         self.punching = True
-        self.weapon = weapon_cls[STICK_WEAPON_IDX](self)
+        self.weapons = [Hands(self)]
+        self.weapon_num = 0
+        self.weapon = self.weapons[self.weapon_num]
 
     def restart(self):
         self.alive = True
@@ -354,17 +398,21 @@ class Player(Entity):
 
     def pg_event(self, event):
         pass
-        # if event.type == pg.MOUSEBUTTONDOWN:
-        #     if event.button == 1:
-        #         # but left
-        #         if self.weapon:
-        #             print(self.weapon, event)
-        #             self.weapon.start_punch()
+        if event.type == pg.MOUSEBUTTONDOWN:
+            print(event)
+            if event.button == 5:
+                self.weapon_num -= 1
+                if self.weapon_num < 0:
+                    self.weapon_num = len(self.weapons) - 1
+            if event.button == 4:
+                self.weapon_num = (self.weapon_num + 1) % len(self.weapons)
+            self.weapon = self.weapons[self.weapon_num]
 
     def update(self, tick=20):
         keys = pg.key.get_pressed()
         if pg.mouse.get_pressed()[0] or keys[pg.K_SPACE]:
-            self.weapon.start_punch()
+            if self.weapon:
+                self.weapon.start_punch()
         movement = [0, 0]
         speed = self.speed * tick
         if self.type_movement == 0:
@@ -425,6 +473,28 @@ class Player(Entity):
     def add_lives(self, lives):
         self.lives = min(self.max_lives, self.lives + lives)
 
+    def buy(self, shop_item: ShopItem):
+        if shop_item.cost <= self.coins:
+            shop_item.remove()
+            self.coins -= shop_item.cost
+            if shop_item.tile_idx == 55:
+                self.add_lives(20)
+            if shop_item.tile_idx in (65, 66, 68):
+                self.buy_weapon(shop_item.tile_idx)
+
+    def buy_weapon(self, weapon_idx):
+        weapon = weapon_cls[weapon_idx](self)
+        find = None
+        for w in self.weapons:
+            if w.index == weapon.index:
+                find = w
+                break
+        if find:
+            self.weapons.remove(find)
+        self.weapons.append(weapon)
+        self.weapon_num = len(self.weapons) - 1
+        self.weapon = self.weapons[self.weapon_num]
+
 
 class Zombie(Player):
     color = "green"
@@ -435,6 +505,7 @@ class Zombie(Player):
         self.collision_entities = True
         self.speed = 0.1
         self.punch = 1
+        self.agresive = True
         self.weapon = weapon_cls[STICK_WEAPON_IDX](self)
 
     def update(self, tick=20):
@@ -470,6 +541,7 @@ class GameMap:
         self.entities = []
         self.type_generate = type_generate
         self.clear_map()
+        self.shop = {}  # cost items
 
     def update(self, tick):
         i = 0
@@ -528,15 +600,18 @@ class GameMap:
             x, y = randint(0, self.size[0] - 1), randint(0, self.size[1] - 1)
             self.array_map[y][x] = 1
 
-    def map_generate(self):
+    def map_generate(self, level=0):
         if self.type_generate == 0:
-            self.bigroom_generate()
+            self.bigroom_generate(level)
         elif self.type_generate == 1:
-            self.random_set()
+            self.random_set(level)
         elif self.type_generate == 2:
-            self.dungeon_generate()
+            if level % 1 > 0:
+                self.shop_generate(level)
+            else:
+                self.dungeon_generate(level)
 
-    def bigroom_generate(self):
+    def bigroom_generate(self, level):
         self.clear_map()
         self.array_map = [[2] * self.size[0]] + [[2] + [0] * (self.size[0] - 2) + [2] for i in
                                                  range(self.size[1] - 2)] + [[2] * self.size[0]]
@@ -549,10 +624,33 @@ class GameMap:
             zombie = Zombie(self.game, (ix * TSIDE, iy * TSIDE))
             self.add_entity(zombie)
 
-
-    def dungeon_generate(self):
+    def shop_generate(self, level):
+        side = 15
+        self.shop = {}
+        self.set_size((side, side))
         self.clear_map()
-        gen = dMap()
+        self.array_map = [[2] * self.size[0]] + [[2] + [0] * (self.size[0] - 2) + [2] for i in
+                                                 range(self.size[1] - 2)] + [[2] * self.size[0]]
+        self.set_tile((7, 3), 7)  # portal
+        n = 2
+        lst_items = [65, 55, 66]
+        if level >= 4:
+            lst_items.append(68)  # red stick
+        items = random.choices(lst_items, k=n)
+        poses_x = [(side // (n + 1)) - 1, side - side // (n + 1)]
+        for i in range(n):
+            pos = (poses_x[i], side // 2)
+            cost = shop_cost[items[i]] + randint(0, 3) + int(level * 1.5)
+            self.add_entity(
+                ShopItem(self.game, (pos[0] * TSIDE - TSIDE // 2, pos[1] * TSIDE - TSIDE // 2), items[i], cost))
+            self.shop[items[i]] = cost
+            self.set_tile(pos, items[i])
+        self.player_position = side // 2 * TSIDE, side // 5*4 * TSIDE
+
+    def dungeon_generate(self, level):
+        self.set_size((15 + 3 * level, 15 + 3 * level))
+        self.clear_map()
+        gen = dMap()  # dungeon generator
         gen.makeMap(self.size[0], self.size[1], 70, 30, (self.size[0] * self.size[1]) ** 0.5)
         self.array_map = gen.mapArr
         # zombs
@@ -634,12 +732,17 @@ class Game:
         self.new_level()
         self.restart_ui.running = False
 
-    def new_level(self, new_level=1):
-        self.level += new_level
-
+    def new_level(self):
+        if self.level % 2 == 0:
+            # to shop
+            self.level += 0.5
+        elif self.level % 1 > 0:
+            # from shop
+            self.level = int(self.level + 0.5)
+        else:
+            self.level += 1
         self.camera.reset_game_map()
-        self.game_map.set_size((15 + 3 * self.level, 15 + 3 * self.level))
-        self.game_map.map_generate()
+        self.game_map.map_generate(self.level)
         self.player.position = Vector2(self.game_map.player_position)
 
     def main(self):
@@ -670,6 +773,8 @@ class Game:
 
 pg.font.init()
 font = pg.font.SysFont("Roboto", 25)
+font_item_cost = pg.font.SysFont("Roboto", 15)
+coin = one_coin_img()
 
 
 class Camera:
@@ -751,7 +856,8 @@ class Camera:
         hand_offset_angle = math.pi / 5
         pos_2 = px + math.sin(entity.rotation) * 10, \
                 py + math.cos(entity.rotation) * 10
-        draw_hands(self.display, entity, (px, py), hand_dist, hand_offset_angle)
+
+        entity.weapon.draw_hands(self.display, (px, py), hand_dist, hand_offset_angle)
         pg.draw.circle(self.display, entity.color, (px, py), r)
         pg.draw.line(self.display, "black", (px, py), pos_2, 1)
 
@@ -759,6 +865,9 @@ class Camera:
             entity.weapon.draw(self.display, (px, py), hand_dist, hand_offset_angle)
 
         if DRAW_ENTITY_RECT:
+            pg.draw.circle(self.display, "red",
+                           (entity.center.x - self.int_position[0], entity.center.y - self.int_position[1]),
+                           entity.radius, 1)
             pg.draw.rect(self.display, "red",
                          ((entity.position.x - self.int_position[0], entity.position.y - self.int_position[1]),
                           entity.size), 1)
@@ -779,13 +888,29 @@ class Camera:
 
     def draw_entities(self):
         for entity in self.game_map.entities:
+            hs = entity.half_size
+            if isinstance(entity, ShopItem):
+                ix = entity.position.x - self.int_position[0] + hs[0]
+                iy = entity.position.y - self.int_position[1] + hs[1] + TSIDE // 2 + 2
+
+                text = font.render(f"{entity.cost}", True, "white")
+                self.display.blit(coin, (ix - 24, iy))
+                self.display.blit(text, (ix - 4, iy + 1))
+                if DRAW_ENTITY_RECT:
+                    # check_collision_circle_circle(pos, r, entity.position, entity.radius):
+                    pg.draw.circle(self.display, "red",
+                                   (entity.center.x - self.int_position[0], entity.center.y - self.int_position[1]),
+                                   entity.radius, 1)
+                    pg.draw.rect(self.display, "red",
+                                 ((entity.position.x - self.int_position[0], entity.position.y - self.int_position[1]),
+                                  entity.size), 1)
+                continue
             self.draw_player_entity(entity)
 
     def draw_ui(self):
         text = font.render(f"Level: {self.game.level}", True, "white")
         self.display.blit(text, (5, 25))
         text = font.render(f"{self.player.coins}", True, "white")
-        coin = one_coin_img()
         self.display.blit(coin, (5, 53))
         self.display.blit(text, (25, 54))
 

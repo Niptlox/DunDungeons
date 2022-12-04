@@ -122,12 +122,16 @@ def raycast_DDA(vPlayer, vMouse, cellSize, vMapSize, arrMap, walls={2, 4, 5}, of
             vRayLength1D.y += vRayUnitStepSize.y
 
         # Test tile at new test point
+        if fDistance > fMaxDistance:
+            fDistance = fMaxDistance
+            break
         coord = (int(vMapCheck.x), int(vMapCheck.y))
         if 0 <= vMapCheck[0] < vMapSize.x and 0 <= vMapCheck[1] < vMapSize.y:
-            lstTilesFound.add(coord)
-            if arrMap[int(vMapCheck.y)][int(vMapCheck.x)] in walls:
-                bTileFound = True
-                last_tile = coord
+            # print((vMapCheck-vRayStart).length(), fMaxDistance)
+                lstTilesFound.add(coord)
+                if arrMap[int(vMapCheck.y)][int(vMapCheck.x)] in walls:
+                    bTileFound = True
+                    last_tile = coord
 
     # Calculate intersection location
     vIntersection = Vector2()
